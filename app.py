@@ -34,7 +34,7 @@ def get_all_comments(video_id: str):
             response = youtube.commentThreads().list(
                 part='snippet',
                 videoId=video_id,
-                maxResults=100,
+                maxResults=100,  # Maximum allowed by the API
                 pageToken=nextPageToken,
                 order='time'
             ).execute()
@@ -47,6 +47,23 @@ def get_all_comments(video_id: str):
                     'likes': comment['likeCount'],
                     'published_at': datetime.strptime(comment['publishedAt'], "%Y-%m-%dT%H:%M:%SZ")
                 })
+
+                # Fetch replies to this comment
+                if item['snippet']['totalReplyCount'] > 0:
+                    replies = youtube.comments().list(
+                        part='snippet',
+                        parentId=item['id'],
+                        maxResults=100  # Maximum allowed by the API
+                    ).execute()
+                    
+                    for reply in replies['items']:
+                        reply_snippet = reply['snippet']
+                        comments.append({
+                            'author': reply_snippet['authorDisplayName'],
+                            'text': reply_snippet['textDisplay'],
+                            'likes': reply_snippet['likeCount'],
+                            'published_at': datetime.strptime(reply_snippet['publishedAt'], "%Y-%m-%dT%H:%M:%SZ")
+                        })
 
             nextPageToken = response.get('nextPageToken')
             if not nextPageToken:
