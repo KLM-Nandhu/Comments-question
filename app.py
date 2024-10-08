@@ -57,13 +57,14 @@ def get_all_comments(video_id: str):
         return f"An error occurred while fetching comments: {str(e)}"
 
 def extract_questions(comments, video_info):
-    comments_with_authors = [f"{comment['author']}: {comment['text']} (Date: {comment['published_at'].strftime('%Y-%m-%d %H:%M:%S')})" for comment in comments]
-    all_comments_text = "\n".join(comments_with_authors)
-    
-    prompt = f"""Analyze the following YouTube comments for the video titled "{video_info['title']}" and extract the 4 most relevant direct questions and 4 most relevant indirect questions about the video content. Improve and rephrase the questions to make them more efficient, clear, and insightful.
+    try:
+        comments_with_authors = [f"{comment['author']}: {comment['text']} (Date: {comment['published_at'].strftime('%Y-%m-%d %H:%M:%S')})" for comment in comments]
+        all_comments_text = "\n".join(comments_with_authors[:100])  # Limit to first 100 comments to avoid token limit
+        
+        prompt = f"""Analyze the following YouTube comments for the video titled "{video_info['title']}" and extract the 4 most relevant direct questions and 4 most relevant indirect questions about the video content. Improve and rephrase the questions to make them more efficient, clear, and insightful.
 
 Video Title: {video_info['title']}
-Video Description: {video_info['description']}
+Video Description: {video_info['description'][:500]}  # Limit description length
 
 Comments:
 {all_comments_text}
@@ -91,19 +92,26 @@ Indirect Questions:
 If there are not enough relevant questions in either category, write 'No more relevant questions found.' for the remaining slots.
 """
 
-    response = openai.ChatCompletion.create(
-        model="gpt-4o-mini",
-        messages=[
-            {"role": "system", "content": "You are an AI assistant specialized in analyzing YouTube comments and extracting insightful, relevant questions. Your task is to identify, categorize, improve, and limit the number of questions from user comments, ensuring they are directly related to the video content."},
-            {"role": "user", "content": prompt}
-        ],
-        max_tokens=1000
-    )
+        response = openai.ChatCompletion.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": "You are an AI assistant specialized in analyzing YouTube comments and extracting insightful, relevant questions. Your task is to identify, categorize, improve, and limit the number of questions from user comments, ensuring they are directly related to the video content."},
+                {"role": "user", "content": prompt}
+            ],
+            max_tokens=1000
+        )
 
-    return response.choices[0].message.content
+        return response.choices[0].message.content
+    except openai.error.InvalidRequestError as e:
+        st.error(f"Error in OpenAI API request: {str(e)}")
+        return "Unable to extract questions due to an API error. This may be due to the length of the input. Try analyzing a video with fewer comments."
+    except Exception as e:
+        st.error(f"An unexpected error occurred: {str(e)}")
+        return "An unexpected error occurred while extracting questions."
 
 def generate_related_questions(questions):
-    prompt = f"""Based on the following extracted questions from YouTube comments, generate a list of 5-10 related questions that could further enhance the discussion about the video content. These related questions should explore themes or topics that are implied by the original questions but not directly asked.
+    try:
+        prompt = f"""Based on the following extracted questions from YouTube comments, generate a list of 5-10 related questions that could further enhance the discussion about the video content. These related questions should explore themes or topics that are implied by the original questions but not directly asked.
 
 Extracted Questions:
 {questions}
@@ -117,16 +125,19 @@ Please provide a list of related questions that:
 Format your response as a numbered list of questions.
 """
 
-    response = openai.ChatCompletion.create(
-        model="gpt-4o-mini",
-        messages=[
-            {"role": "system", "content": "You are an AI assistant specialized in generating insightful and related questions based on existing questions from YouTube comments."},
-            {"role": "user", "content": prompt}
-        ],
-        max_tokens=1000
-    )
+        response = openai.ChatCompletion.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": "You are an AI assistant specialized in generating insightful and related questions based on existing questions from YouTube comments."},
+                {"role": "user", "content": prompt}
+            ],
+            max_tokens=1000
+        )
 
-    return response.choices[0].message.content
+        return response.choices[0].message.content
+    except Exception as e:
+        st.error(f"An error occurred while generating related questions: {str(e)}")
+        return "Unable to generate related questions due to an error."
 
 def get_video_info(video_id):
     try:
@@ -153,19 +164,23 @@ def get_video_info(video_id):
         return None
 
 def analyze_comment_sentiment(comment):
-    prompt = f"Analyze the sentiment of the following comment and classify it as POSITIVE, NEGATIVE, or NEUTRAL. Respond with only one word: POSITIVE, NEGATIVE, or NEUTRAL.\n\nComment: {comment['text']}"
-    
-    response = openai.ChatCompletion.create(
-        model="gpt-4o-mini",
-        messages=[
-            {"role": "system", "content": "You are a sentiment analysis AI. Classify the given comment as POSITIVE, NEGATIVE, or NEUTRAL."},
-            {"role": "user", "content": prompt}
-        ],
-        max_tokens=10
-    )
-    
-    sentiment = response.choices[0].message.content.strip().upper()
-    return sentiment if sentiment in ["POSITIVE", "NEGATIVE", "NEUTRAL"] else "NEUTRAL"
+    try:
+        prompt = f"Analyze the sentiment of the following comment and classify it as POSITIVE, NEGATIVE, or NEUTRAL. Respond with only one word: POSITIVE, NEGATIVE, or NEUTRAL.\n\nComment: {comment['text']}"
+        
+        response = openai.ChatCompletion.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": "You are a sentiment analysis AI. Classify the given comment as POSITIVE, NEGATIVE, or NEUTRAL."},
+                {"role": "user", "content": prompt}
+            ],
+            max_tokens=10
+        )
+        
+        sentiment = response.choices[0].message.content.strip().upper()
+        return sentiment if sentiment in ["POSITIVE", "NEGATIVE", "NEUTRAL"] else "NEUTRAL"
+    except Exception as e:
+        st.warning(f"Error analyzing sentiment for a comment: {str(e)}")
+        return "NEUTRAL"
 
 def analyze_comments(video_id):
     if video_id:
@@ -175,9 +190,17 @@ def analyze_comments(video_id):
                 st.session_state.comments = comments
                 st.session_state.comments.sort(key=lambda x: x['published_at'], reverse=True)
                 st.session_state.video_info = get_video_info(video_id)
-                st.session_state.questions = extract_questions(comments, st.session_state.video_info)
-                st.session_state.related_questions = generate_related_questions(st.session_state.questions)
                 
+                if st.session_state.video_info:
+                    st.session_state.questions = extract_questions(comments[:100], st.session_state.video_info)  # Limit to 100 comments
+                    if st.session_state.questions and not st.session_state.questions.startswith("Unable to extract questions"):
+                        st.session_state.related_questions = generate_related_questions(st.session_state.questions)
+                    else:
+                        st.session_state.related_questions = "Unable to generate related questions due to an error in extracting initial questions."
+                else:
+                    st.error("Unable to fetch video information. Please check the video ID and try again.")
+                    return
+
                 # Analyze sentiment for each comment
                 sentiments = defaultdict(list)
                 for comment in comments:
@@ -427,7 +450,7 @@ if st.session_state.comments:
         if export_format == "CSV":
             csv = "Author,Text,Likes,Published At,Sentiment\n"
             for comment in st.session_state.comments:
-                csv += f"{comment['author']},{comment['text'].replace(',', ' ')},{comment['likes']},{comment['published_at']},{comment['sentiment']}\n"
+                csv += f"{comment['author']},{comment['text'].replace(',', ' ')},{comment['likes']},{comment['published_at']},{comment.get('sentiment', 'NEUTRAL')}\n"
             st.download_button(
                 label="Download CSV",
                 data=csv,
