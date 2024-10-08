@@ -7,6 +7,7 @@ import json
 from docx import Document
 from io import BytesIO
 from dotenv import load_dotenv
+from collections import defaultdict
 
 load_dotenv()
 
@@ -91,7 +92,7 @@ If there are not enough relevant questions in either category, write 'No more re
 """
 
     response = openai.ChatCompletion.create(
-        model="gpt-4o-mini",  # Using GPT-4 for better accuracy and relevance
+        model="gpt-4o-mini",
         messages=[
             {"role": "system", "content": "You are an AI assistant specialized in analyzing YouTube comments and extracting insightful, relevant questions. Your task is to identify, categorize, improve, and limit the number of questions from user comments, ensuring they are directly related to the video content."},
             {"role": "user", "content": prompt}
@@ -151,31 +152,51 @@ def get_video_info(video_id):
         st.error(f"An error occurred while fetching video info: {str(e)}")
         return None
 
-def analyze_sentiment(comments):
-    positive_words = set(['good', 'great', 'awesome', 'excellent', 'amazing', 'love', 'like', 'best'])
-    negative_words = set(['bad', 'terrible', 'awful', 'worst', 'hate', 'dislike', 'poor'])
+def analyze_comment_sentiment(comment):
+    prompt = f"Analyze the sentiment of the following comment and classify it as POSITIVE, NEGATIVE, or NEUTRAL. Respond with only one word: POSITIVE, NEGATIVE, or NEUTRAL.\n\nComment: {comment['text']}"
     
-    positive_count = 0
-    negative_count = 0
-    neutral_count = 0
+    response = openai.ChatCompletion.create(
+        model="gpt-4o-mini",
+        messages=[
+            {"role": "system", "content": "You are a sentiment analysis AI. Classify the given comment as POSITIVE, NEGATIVE, or NEUTRAL."},
+            {"role": "user", "content": prompt}
+        ],
+        max_tokens=10
+    )
     
-    for comment in comments:
-        text = comment['text'].lower()
-        if any(word in text for word in positive_words):
-            positive_count += 1
-        elif any(word in text for word in negative_words):
-            negative_count += 1
-        else:
-            neutral_count += 1
-    
-    total = positive_count + negative_count + neutral_count
-    return {
-        'positive': positive_count / total if total > 0 else 0,
-        'negative': negative_count / total if total > 0 else 0,
-        'neutral': neutral_count / total if total > 0 else 0
-    }
+    sentiment = response.choices[0].message.content.strip().upper()
+    return sentiment if sentiment in ["POSITIVE", "NEGATIVE", "NEUTRAL"] else "NEUTRAL"
 
-def create_docx_report(video_info, comments, questions, related_questions, sentiment):
+def analyze_comments(video_id):
+    if video_id:
+        with st.spinner("📊 Fetching and analyzing comments..."):
+            comments = get_all_comments(video_id)
+            if isinstance(comments, list):
+                st.session_state.comments = comments
+                st.session_state.comments.sort(key=lambda x: x['published_at'], reverse=True)
+                st.session_state.video_info = get_video_info(video_id)
+                st.session_state.questions = extract_questions(comments, st.session_state.video_info)
+                st.session_state.related_questions = generate_related_questions(st.session_state.questions)
+                
+                # Analyze sentiment for each comment
+                sentiments = defaultdict(list)
+                for comment in comments:
+                    sentiment = analyze_comment_sentiment(comment)
+                    comment['sentiment'] = sentiment
+                    sentiments[sentiment].append(comment)
+                
+                st.session_state.sentiments = dict(sentiments)
+                st.session_state.sentiment_counts = {
+                    'POSITIVE': len(sentiments['POSITIVE']),
+                    'NEGATIVE': len(sentiments['NEGATIVE']),
+                    'NEUTRAL': len(sentiments['NEUTRAL'])
+                }
+            else:
+                st.error(comments)
+    else:
+        st.error("⚠️ Please enter a YouTube Video ID.")
+
+def create_docx_report(video_info, comments, questions, related_questions, sentiment_counts, sentiments):
     doc = Document()
     doc.add_heading('YouTube Video Analysis Report', 0)
 
@@ -189,9 +210,20 @@ def create_docx_report(video_info, comments, questions, related_questions, senti
 
     # Sentiment Analysis
     doc.add_heading('Sentiment Analysis', level=1)
-    doc.add_paragraph(f"Positive: {sentiment['positive']:.2%}")
-    doc.add_paragraph(f"Neutral: {sentiment['neutral']:.2%}")
-    doc.add_paragraph(f"Negative: {sentiment['negative']:.2%}")
+    total_comments = sum(sentiment_counts.values())
+    doc.add_paragraph(f"Positive: {(sentiment_counts['POSITIVE'] / total_comments) * 100:.2f}%")
+    doc.add_paragraph(f"Neutral: {(sentiment_counts['NEUTRAL'] / total_comments) * 100:.2f}%")
+    doc.add_paragraph(f"Negative: {(sentiment_counts['NEGATIVE'] / total_comments) * 100:.2f}%")
+
+    # Add sentiment-specific comments
+    for sentiment in ['POSITIVE', 'NEUTRAL', 'NEGATIVE']:
+        doc.add_heading(f"{sentiment.capitalize()} Comments", level=2)
+        for comment in sentiments[sentiment]:
+            doc.add_paragraph(f"Author: {comment['author']}")
+            doc.add_paragraph(f"Text: {comment['text']}")
+            doc.add_paragraph(f"Likes: {comment['likes']}")
+            doc.add_paragraph(f"Published at: {comment['published_at']}")
+            doc.add_paragraph("---")
 
     # Extracted and Improved Questions
     doc.add_heading('Extracted and Improved Questions', level=1)
@@ -201,32 +233,7 @@ def create_docx_report(video_info, comments, questions, related_questions, senti
     doc.add_heading('Related Questions', level=1)
     doc.add_paragraph(related_questions)
 
-    # Comments
-    doc.add_heading('Comments', level=1)
-    for comment in comments:
-        doc.add_paragraph(f"Author: {comment['author']}")
-        doc.add_paragraph(f"Text: {comment['text']}")
-        doc.add_paragraph(f"Likes: {comment['likes']}")
-        doc.add_paragraph(f"Published at: {comment['published_at']}")
-        doc.add_paragraph("---")
-
     return doc
-
-def analyze_comments(video_id):
-    if video_id:
-        with st.spinner("📊 Fetching and analyzing comments..."):
-            comments = get_all_comments(video_id)
-            if isinstance(comments, list):
-                st.session_state.comments = comments
-                st.session_state.comments.sort(key=lambda x: x['published_at'], reverse=True)
-                st.session_state.video_info = get_video_info(video_id)
-                st.session_state.questions = extract_questions(comments, st.session_state.video_info)
-                st.session_state.related_questions = generate_related_questions(st.session_state.questions)
-                st.session_state.sentiment = analyze_sentiment(comments)
-            else:
-                st.error(comments)
-    else:
-        st.error("⚠️ Please enter a YouTube Video ID.")
 
 st.set_page_config(layout="wide", page_title="Bent's Comment Analyzer 🎥💬")
 
@@ -339,8 +346,10 @@ if 'related_questions' not in st.session_state:
     st.session_state.related_questions = None
 if 'video_info' not in st.session_state:
     st.session_state.video_info = None
-if 'sentiment' not in st.session_state:
-    st.session_state.sentiment = None
+if 'sentiments' not in st.session_state:
+    st.session_state.sentiments = None
+if 'sentiment_counts' not in st.session_state:
+    st.session_state.sentiment_counts = None
 
 def toggle_sort_order():
     st.session_state.sort_order = 'oldest' if st.session_state.sort_order == 'newest' else 'newest'
@@ -370,12 +379,43 @@ if st.session_state.video_info:
     with col2:
         st.image(st.session_state.video_info['thumbnail'], use_column_width=True)
 
-if st.session_state.sentiment:
+if 'sentiment_counts' in st.session_state:
     st.markdown("## 💭 Sentiment Analysis")
     col1, col2, col3 = st.columns(3)
-    col1.metric("Positive", f"{st.session_state.sentiment['positive']:.2%}")
-    col2.metric("Neutral", f"{st.session_state.sentiment['neutral']:.2%}")
-    col3.metric("Negative", f"{st.session_state.sentiment['negative']:.2%}")
+    total_comments = sum(st.session_state.sentiment_counts.values())
+    
+    def show_sentiment_comments(sentiment):
+        st.session_state.active_sentiment = sentiment
+    
+    with col1:
+        positive_percentage = (st.session_state.sentiment_counts['POSITIVE'] / total_comments) * 100
+        st.metric("Positive", f"{positive_percentage:.2f}%")
+        if st.button("Show Positive Comments"):
+            show_sentiment_comments('POSITIVE')
+    
+    with col2:
+        neutral_percentage = (st.session_state.sentiment_counts['NEUTRAL'] / total_comments) * 100
+        st.metric("Neutral", f"{neutral_percentage:.2f}%")
+        if st.button("Show Neutral Comments"):
+            show_sentiment_comments('NEUTRAL')
+    
+    with col3:
+        negative_percentage = (st.session_state.sentiment_counts['NEGATIVE'] / total_comments) * 100
+        st.metric("Negative", f"{negative_percentage:.2f}%")
+        if st.button("Show Negative Comments"):
+            show_sentiment_comments('NEGATIVE')
+
+    if 'active_sentiment' in st.session_state:
+        st.markdown(f"## {st.session_state.active_sentiment.capitalize()} Comments")
+        for comment in st.session_state.sentiments[st.session_state.active_sentiment]:
+            st.markdown(f"""
+            <div class="comment">
+                <div class="comment-author">👤 {comment['author']}</div>
+                <div class="comment-date">🕒 {comment['published_at'].strftime('%Y-%m-%d %H:%M:%S')}</div>
+                <div class="comment-text">{comment['text']}</div>
+                <div class="comment-likes">❤️ {comment['likes']}</div>
+            </div>
+            """, unsafe_allow_html=True)
 
 if st.session_state.comments:
     st.markdown("## 📤 Export Data")
@@ -383,9 +423,9 @@ if st.session_state.comments:
     
     if st.button("Export Data"):
         if export_format == "CSV":
-            csv = "Author,Text,Likes,Published At\n"
+            csv = "Author,Text,Likes,Published At,Sentiment\n"
             for comment in st.session_state.comments:
-                csv += f"{comment['author']},{comment['text'].replace(',', ' ')},{comment['likes']},{comment['published_at']}\n"
+                csv += f"{comment['author']},{comment['text'].replace(',', ' ')},{comment['likes']},{comment['published_at']},{comment['sentiment']}\n"
             st.download_button(
                 label="Download CSV",
                 data=csv,
@@ -395,7 +435,7 @@ if st.session_state.comments:
         elif export_format == "JSON":
             data = {
                 "video_info": st.session_state.video_info,
-                "sentiment": st.session_state.sentiment,
+                "sentiment_counts": st.session_state.sentiment_counts,
                 "questions": st.session_state.questions,
                 "related_questions": st.session_state.related_questions,
                 "comments": st.session_state.comments
@@ -413,7 +453,8 @@ if st.session_state.comments:
                 st.session_state.comments,
                 st.session_state.questions,
                 st.session_state.related_questions,
-                st.session_state.sentiment
+                st.session_state.sentiment_counts,
+                st.session_state.sentiments
             )
             bio = BytesIO()
             doc.save(bio)
@@ -470,4 +511,3 @@ if st.session_state.comments:
             st.info("💡 No related questions generated yet. Try analyzing a video to get related questions.")
 
 st.markdown("---")
-st.markdown("Developed with ❤️ using Streamlit")
