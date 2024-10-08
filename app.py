@@ -379,7 +379,7 @@ if st.session_state.video_info:
     with col2:
         st.image(st.session_state.video_info['thumbnail'], use_column_width=True)
 
-if 'sentiment_counts' in st.session_state:
+if 'sentiment_counts' in st.session_state and st.session_state.sentiment_counts:
     st.markdown("## 💭 Sentiment Analysis")
     col1, col2, col3 = st.columns(3)
     total_comments = sum(st.session_state.sentiment_counts.values())
@@ -388,26 +388,26 @@ if 'sentiment_counts' in st.session_state:
         st.session_state.active_sentiment = sentiment
     
     with col1:
-        positive_percentage = (st.session_state.sentiment_counts['POSITIVE'] / total_comments) * 100
+        positive_percentage = (st.session_state.sentiment_counts.get('POSITIVE', 0) / total_comments) * 100 if total_comments else 0
         st.metric("Positive", f"{positive_percentage:.2f}%")
         if st.button("Show Positive Comments"):
             show_sentiment_comments('POSITIVE')
     
     with col2:
-        neutral_percentage = (st.session_state.sentiment_counts['NEUTRAL'] / total_comments) * 100
+        neutral_percentage = (st.session_state.sentiment_counts.get('NEUTRAL', 0) / total_comments) * 100 if total_comments else 0
         st.metric("Neutral", f"{neutral_percentage:.2f}%")
         if st.button("Show Neutral Comments"):
             show_sentiment_comments('NEUTRAL')
     
     with col3:
-        negative_percentage = (st.session_state.sentiment_counts['NEGATIVE'] / total_comments) * 100
+        negative_percentage = (st.session_state.sentiment_counts.get('NEGATIVE', 0) / total_comments) * 100 if total_comments else 0
         st.metric("Negative", f"{negative_percentage:.2f}%")
         if st.button("Show Negative Comments"):
             show_sentiment_comments('NEGATIVE')
 
-    if 'active_sentiment' in st.session_state:
+    if 'active_sentiment' in st.session_state and 'sentiments' in st.session_state:
         st.markdown(f"## {st.session_state.active_sentiment.capitalize()} Comments")
-        for comment in st.session_state.sentiments[st.session_state.active_sentiment]:
+        for comment in st.session_state.sentiments.get(st.session_state.active_sentiment, []):
             st.markdown(f"""
             <div class="comment">
                 <div class="comment-author">👤 {comment['author']}</div>
@@ -416,6 +416,8 @@ if 'sentiment_counts' in st.session_state:
                 <div class="comment-likes">❤️ {comment['likes']}</div>
             </div>
             """, unsafe_allow_html=True)
+else:
+    st.info("No sentiment analysis data available. Please analyze comments first.")
 
 if st.session_state.comments:
     st.markdown("## 📤 Export Data")
