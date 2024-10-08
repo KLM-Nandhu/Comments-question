@@ -214,6 +214,7 @@ def analyze_comments(video_id):
                     'NEGATIVE': len(sentiments['NEGATIVE']),
                     'NEUTRAL': len(sentiments['NEUTRAL'])
                 }
+                st.session_state.total_comments_analyzed = len(comments)
             else:
                 st.error(comments)
     else:
@@ -234,9 +235,10 @@ def create_docx_report(video_info, comments, questions, related_questions, senti
     # Sentiment Analysis
     doc.add_heading('Sentiment Analysis', level=1)
     total_comments = sum(sentiment_counts.values())
-    doc.add_paragraph(f"Positive: {(sentiment_counts['POSITIVE'] / total_comments) * 100:.2f}%")
-    doc.add_paragraph(f"Neutral: {(sentiment_counts['NEUTRAL'] / total_comments) * 100:.2f}%")
-    doc.add_paragraph(f"Negative: {(sentiment_counts['NEGATIVE'] / total_comments) * 100:.2f}%")
+    doc.add_paragraph(f"Total comments analyzed: {total_comments}")
+    doc.add_paragraph(f"Positive: {sentiment_counts['POSITIVE']} ({(sentiment_counts['POSITIVE'] / total_comments) * 100:.2f}%)")
+    doc.add_paragraph(f"Neutral: {sentiment_counts['NEUTRAL']} ({(sentiment_counts['NEUTRAL'] / total_comments) * 100:.2f}%)")
+    doc.add_paragraph(f"Negative: {sentiment_counts['NEGATIVE']} ({(sentiment_counts['NEGATIVE'] / total_comments) * 100:.2f}%)")
 
     # Add sentiment-specific comments
     for sentiment in ['POSITIVE', 'NEUTRAL', 'NEGATIVE']:
@@ -350,6 +352,13 @@ st.markdown("""
     .sort-button:hover {
         background-color: #27ae60;
     }
+    .summary-box {
+        background-color: #ecf0f1;
+        border-radius: 5px;
+        padding: 10px;
+        margin-bottom: 15px;
+        font-size: 0.9em;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -373,6 +382,8 @@ if 'sentiments' not in st.session_state:
     st.session_state.sentiments = None
 if 'sentiment_counts' not in st.session_state:
     st.session_state.sentiment_counts = None
+if 'total_comments_analyzed' not in st.session_state:
+    st.session_state.total_comments_analyzed = 0
 
 def toggle_sort_order():
     st.session_state.sort_order = 'oldest' if st.session_state.sort_order == 'newest' else 'newest'
@@ -404,6 +415,17 @@ if st.session_state.video_info:
 
 if 'sentiment_counts' in st.session_state and st.session_state.sentiment_counts:
     st.markdown("## 💭 Sentiment Analysis")
+    
+    # Add summary box
+    st.markdown(f"""
+    <div class="summary-box">
+        Total comments analyzed: {st.session_state.total_comments_analyzed}<br>
+        Positive: {st.session_state.sentiment_counts['POSITIVE']}<br>
+        Neutral: {st.session_state.sentiment_counts['NEUTRAL']}<br>
+        Negative: {st.session_state.sentiment_counts['NEGATIVE']}
+    </div>
+    """, unsafe_allow_html=True)
+    
     col1, col2, col3 = st.columns(3)
     total_comments = sum(st.session_state.sentiment_counts.values())
     
@@ -463,7 +485,8 @@ if st.session_state.comments:
                 "sentiment_counts": st.session_state.sentiment_counts,
                 "questions": st.session_state.questions,
                 "related_questions": st.session_state.related_questions,
-                "comments": st.session_state.comments
+                "comments": st.session_state.comments,
+                "total_comments_analyzed": st.session_state.total_comments_analyzed
             }
             json_str = json.dumps(data, default=str)
             st.download_button(
